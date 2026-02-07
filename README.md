@@ -1,17 +1,11 @@
 # Headline Triage Tool for Human Factors Relevance
 
 ## Quickstart
-1. Install dependencies:
+1. Run the app (single-file executable):
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
+   python triage_tool.py
    ```
-2. Run the app:
-   ```bash
-   python app.py
-   ```
-3. Open `http://localhost:8000` and paste headlines (one per line or CSV with title, URL, source).
+2. Open `http://localhost:8000` and paste headlines (one per line or CSV with title, URL, source).
 
 ## One-line summary
 You paste (or pull) hundreds of headlines, the tool scores each one for human factors relevance (1–10), then returns a ranked top 20 with short “HF angles” you can use for research notes or podcast prep.
@@ -114,6 +108,7 @@ Controls:
 ## Implementation notes (current)
 - CSV ingestion supports `title, url, source` per line.
 - Results are de-duplicated by title similarity and capped per source to reduce overlaps.
+- `triage_tool.py` is a single-file executable with embedded UI styles.
 
 ## UI sketch (simple)
 
