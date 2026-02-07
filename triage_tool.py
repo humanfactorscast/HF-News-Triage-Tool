@@ -5,7 +5,6 @@ import html
 import re
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from io import BytesIO
 from urllib.parse import parse_qs
 
 
@@ -14,6 +13,8 @@ class Headline:
     title: str
     url: str | None = None
     source: str | None = None
+    description: str | None = None
+    time_ago: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,24 +62,100 @@ DOMAINS = [
 
 
 def parse_headlines(raw_text: str) -> list[Headline]:
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    lines = [line.strip() for line in raw_text.splitlines()]
+    lines = [line for line in lines if line]
     if not lines:
         return []
 
+    if any("," in line for line in lines):
+        return _parse_csv_lines(lines)
+    return _parse_block_lines(lines)
+
+
+def _parse_csv_lines(lines: list[str]) -> list[Headline]:
     headlines: list[Headline] = []
     for line in lines:
-        if "," in line:
-            try:
-                parsed = next(csv.reader([line]))
-            except csv.Error:
-                parsed = [line]
-            title = parsed[0].strip()
-            url = parsed[1].strip() if len(parsed) > 1 and parsed[1].strip() else None
-            source = parsed[2].strip() if len(parsed) > 2 and parsed[2].strip() else None
-            headlines.append(Headline(title=title, url=url, source=source))
-        else:
-            headlines.append(Headline(title=line))
+        if not line:
+            continue
+        try:
+            parsed = next(csv.reader([line]))
+        except csv.Error:
+            parsed = [line]
+        title = parsed[0].strip() if len(parsed) > 0 else ""
+        if not title:
+            continue
+        url = parsed[1].strip() if len(parsed) > 1 and parsed[1].strip() else None
+        source = parsed[2].strip() if len(parsed) > 2 and parsed[2].strip() else None
+        description = parsed[3].strip() if len(parsed) > 3 and parsed[3].strip() else None
+        time_ago = parsed[4].strip() if len(parsed) > 4 and parsed[4].strip() else None
+        headlines.append(
+            Headline(
+                title=title,
+                url=url,
+                source=source,
+                description=description,
+                time_ago=time_ago,
+            )
+        )
     return headlines
+
+
+def _parse_block_lines(lines: list[str]) -> list[Headline]:
+    headlines: list[Headline] = []
+    index = 0
+    while index < len(lines):
+        source = lines[index].strip()
+        index += 1
+        if not source:
+            continue
+
+        if index >= len(lines):
+            break
+        possible_title = lines[index].strip()
+        if possible_title.isdigit():
+            index += 1
+            if index >= len(lines):
+                break
+            possible_title = lines[index].strip()
+        title = possible_title
+        index += 1
+        if not title:
+            continue
+
+        description = None
+        time_ago = None
+        if index < len(lines) and lines[index].strip() == "•":
+            index += 1
+        if index < len(lines):
+            description_candidate = lines[index].strip()
+            if _looks_like_time(description_candidate):
+                time_ago = description_candidate
+                index += 1
+            else:
+                description = description_candidate
+                index += 1
+                if index < len(lines) and lines[index].strip() == "•":
+                    index += 1
+                    if index < len(lines):
+                        description = lines[index].strip() or description
+                        index += 1
+                if index < len(lines) and _looks_like_time(lines[index].strip()):
+                    time_ago = lines[index].strip()
+                    index += 1
+
+        headlines.append(
+            Headline(
+                title=title,
+                source=source,
+                description=description,
+                time_ago=time_ago,
+            )
+        )
+    return headlines
+
+
+def _looks_like_time(value: str) -> bool:
+    return bool(re.match(r"^\\d+\\s*[hm]$", value.strip().lower()))
 
 
 def score_headlines(
@@ -239,6 +316,16 @@ def _render_page(
                 if item.headline.source
                 else ""
             )
+            description_html = (
+                f"<p class=\"description\">{html.escape(item.headline.description)}</p>"
+                if item.headline.description
+                else ""
+            )
+            time_html = (
+                f"<span class=\"time\">{html.escape(item.headline.time_ago)}</span>"
+                if item.headline.time_ago
+                else ""
+            )
             cards.append(
                 """
                 <article class=\"result-card\">
@@ -248,8 +335,12 @@ def _render_page(
                       <h3>{title}</h3>
                       {url_html}
                       {source_html}
+                      {description_html}
                     </div>
-                    <span class=\"confidence {confidence_lower}\">{confidence}</span>
+                    <div class=\"meta\">
+                      {time_html}
+                      <span class=\"confidence {confidence_lower}\">{confidence}</span>
+                    </div>
                   </div>
                   <div class=\"tags\">{tags}</div>
                   <p class=\"angle\">{angle}</p>
@@ -260,6 +351,8 @@ def _render_page(
                     title=html.escape(item.headline.title),
                     url_html=url_html,
                     source_html=source_html,
+                    description_html=description_html,
+                    time_html=time_html,
                     confidence=item.confidence,
                     confidence_lower=item.confidence.lower(),
                     tags=tags,
@@ -446,10 +539,28 @@ def _render_page(
         font-size: 0.8rem;
       }}
 
+      .meta {{
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+      }}
+
       .source {{
         margin: 4px 0 0;
         color: var(--muted);
         font-size: 0.85rem;
+      }}
+
+      .description {{
+        margin: 6px 0 0;
+        color: var(--text);
+        font-size: 0.9rem;
+      }}
+
+      .time {{
+        font-size: 0.8rem;
+        color: var(--muted);
       }}
 
       .angle {{
@@ -480,7 +591,7 @@ def _render_page(
           </p>
         </header>
         <form method=\"post\" class=\"form\">
-          <label for=\"headlines\">Headlines (one per line or CSV: title, url, source)</label>
+          <label for=\"headlines\">Headlines (CSV: title, url, source, description, time ago or blocks)</label>
           <textarea id=\"headlines\" name=\"headlines\" rows=\"14\" required>{escaped_headlines}</textarea>
 
           <div class=\"controls\">
