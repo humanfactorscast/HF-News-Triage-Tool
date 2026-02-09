@@ -111,6 +111,7 @@ Controls:
 - Results are de-duplicated by title similarity and capped per source to reduce overlaps.
 - `triage_tool.py` is a single-file executable with embedded UI styles.
 - Optional local LLM scoring calls `http://localhost:8080/completion` (compatible with llama.cpp server) when enabled.
+- Scoring uses the Human Factors tag list (provided) as additional keyword signals and boosts.
 
 ## UI sketch (simple)
 

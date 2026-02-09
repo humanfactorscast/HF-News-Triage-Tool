@@ -45,6 +45,42 @@ CONCEPTS = {
     "org factors": ["handoff", "shift", "team", "coordination", "communication"],
 }
 
+TAG_LIST = [
+    "humanfactors",
+    "ergonomics",
+    "systemsengineering",
+    "industrialdesign",
+    "humanoperators",
+    "occupationalhealth",
+    "occupationalsafety",
+    "usabilityengineering",
+    "HCI",
+    "cognitiveergonomics",
+    "humanperformance",
+    "industrialengineering",
+    "workplacedesign",
+    "cognitiveengineering",
+    "taskanalysis",
+    "anthropometrics",
+    "riskassessment",
+    "safetyengineering",
+    "medicaldevices",
+    "healthcareergonomics",
+    "cyberphysicalsystems",
+    "transportationsystems",
+    "industrialprocess",
+    "AccessibilityDesign",
+    "BehavioralEconomics",
+    "UXResearch",
+    "HumanCenteredAI",
+    "UserInterfaceDesign",
+    "HealthcareUX",
+    "SmartDevices",
+    "WearableTech",
+    "InclusiveDesign",
+    "SustainableDesign",
+]
+
 DOMAIN_MAP = {
     "ux_hci": {"usability", "decision making"},
     "safety": {"error", "safety culture", "situation awareness"},
@@ -257,19 +293,24 @@ def _score_one(
                 matches.append((concept, keyword))
                 break
 
+    tag_matches = _match_tags(text)
     unique_concepts = {concept for concept, _ in matches}
     score = 1 + min(9, len(unique_concepts) * 2)
+    tag_bonus = min(4, len(tag_matches))
+    score = min(10, score + tag_bonus)
     llm_summary = None
     if use_llm:
         llm_score, llm_summary = _llm_infer_score(headline)
         llm_bonus = max(0, min(3, llm_score - score))
         score = min(10, score + llm_bonus)
-    tags = sorted(unique_concepts)[:5]
+    tags = sorted(unique_concepts | set(tag_matches))[:5]
     angle = _build_angle(tags)
     confidence = _confidence_for(score, len(unique_concepts))
     rationale = [f"Matched {concept}." for concept in tags] or [
         "No strong human factors cues found in the headline.",
     ]
+    if tag_matches:
+        rationale.append(f"Tag signal: {', '.join(tag_matches[:5])}.")
     if llm_summary:
         rationale.append(f"LLM signal: {llm_summary}")
     return ScoredHeadline(
@@ -304,6 +345,32 @@ def _confidence_rank(confidence: str) -> int:
 
 def _normalize_title(title: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", title.lower()).strip()
+
+
+def _match_tags(text: str) -> list[str]:
+    lowered = text.lower()
+    matched: list[str] = []
+    for tag in TAG_LIST:
+        normalized = _normalize_tag(tag)
+        if not normalized:
+            continue
+        if normalized in lowered.replace("-", " "):
+            matched.append(tag)
+            continue
+        if _all_words_present(normalized, lowered):
+            matched.append(tag)
+    return matched
+
+
+def _normalize_tag(tag: str) -> str:
+    tag = tag.replace("_", " ").replace("-", " ")
+    spaced = re.sub(r"(?<!^)(?=[A-Z])", " ", tag)
+    return re.sub(r"\\s+", " ", spaced).lower().strip()
+
+
+def _all_words_present(normalized: str, text: str) -> bool:
+    words = [word for word in normalized.split() if word]
+    return all(word in text for word in words)
 
 
 def _diversify(items: list[ScoredHeadline]) -> list[ScoredHeadline]:
