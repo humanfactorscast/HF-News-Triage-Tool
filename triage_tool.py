@@ -245,12 +245,14 @@ def score_headlines(
     active_domains: list[str],
     score_threshold: int,
     use_llm: bool,
+    tag_list: list[str],
     top_n: int = 20,
     max_per_source: int = 3,
 ) -> list[ScoredHeadline]:
     active_concepts = _resolve_concepts(active_domains)
     scored = [
-        _score_one(headline, active_concepts, use_llm=use_llm) for headline in headlines
+        _score_one(headline, active_concepts, use_llm=use_llm, tag_list=tag_list)
+        for headline in headlines
     ]
     filtered = [item for item in scored if item.score >= score_threshold]
     diversified = _diversify(filtered)
@@ -280,6 +282,7 @@ def _score_one(
     headline: Headline,
     concepts: dict[str, list[str]],
     use_llm: bool,
+    tag_list: list[str],
 ) -> ScoredHeadline:
     text = " ".join(
         part.lower()
@@ -293,7 +296,7 @@ def _score_one(
                 matches.append((concept, keyword))
                 break
 
-    tag_matches = _match_tags(text)
+    tag_matches = _match_tags(text, tag_list)
     unique_concepts = {concept for concept, _ in matches}
     score = 1 + min(9, len(unique_concepts) * 2)
     tag_bonus = min(4, len(tag_matches))
@@ -347,10 +350,10 @@ def _normalize_title(title: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", title.lower()).strip()
 
 
-def _match_tags(text: str) -> list[str]:
+def _match_tags(text: str, tag_list: list[str]) -> list[str]:
     lowered = text.lower()
     matched: list[str] = []
-    for tag in TAG_LIST:
+    for tag in tag_list:
         normalized = _normalize_tag(tag)
         if not normalized:
             continue
@@ -371,6 +374,15 @@ def _normalize_tag(tag: str) -> str:
 def _all_words_present(normalized: str, text: str) -> bool:
     words = [word for word in normalized.split() if word]
     return all(word in text for word in words)
+
+
+def _parse_custom_tags(raw_text: str) -> list[str]:
+    tags: list[str] = []
+    for line in raw_text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            tags.append(cleaned)
+    return tags or TAG_LIST
 
 
 def _diversify(items: list[ScoredHeadline]) -> list[ScoredHeadline]:
@@ -413,9 +425,11 @@ def _render_page(
     score_threshold: int,
     active_domains: list[str],
     use_llm: bool,
+    tag_text: str,
 ) -> str:
     escaped_headlines = html.escape(headlines_text)
     llm_checked = "checked" if use_llm else ""
+    escaped_tags = html.escape(tag_text)
     domain_markup = "".join(
         """
         <label class=\"checkbox\">
@@ -613,6 +627,52 @@ def _render_page(
         align-items: flex-start;
       }}
 
+      .settings-toggle {{
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        color: var(--primary);
+      }}
+
+      .settings-toggle span {{
+        display: inline-flex;
+        flex-direction: column;
+        gap: 4px;
+      }}
+
+      .settings-toggle span i {{
+        width: 18px;
+        height: 2px;
+        background: var(--primary);
+        border-radius: 999px;
+      }}
+
+      .settings-panel {{
+        display: none;
+        margin-top: 12px;
+        padding: 16px;
+        border-radius: 12px;
+        background: #ffffff;
+        border: 1px solid var(--border);
+      }}
+
+      #settings-toggle:checked ~ .settings-panel {{
+        display: grid;
+        gap: 12px;
+      }}
+
+      .settings-panel textarea {{
+        min-height: 160px;
+        font-size: 0.9rem;
+      }}
+
+      .settings-note {{
+        font-size: 0.85rem;
+        color: var(--muted);
+      }}
+
       .controls > div {{
         min-width: 200px;
       }}
@@ -796,6 +856,26 @@ def _render_page(
             </label>
           </div>
 
+          <div>
+            <label class=\"settings-toggle\" for=\"settings-toggle\">
+              <span>
+                <i></i>
+                <i></i>
+                <i></i>
+              </span>
+              Settings
+            </label>
+            <input type=\"checkbox\" id=\"settings-toggle\" hidden />
+            <div class=\"settings-panel\">
+              <label for=\"custom_tags\">HF tag list (one per line)</label>
+              <textarea id=\"custom_tags\" name=\"custom_tags\">{escaped_tags}</textarea>
+              <p class=\"settings-note\">
+                Edit tags to tailor scoring to your show’s focus. These tags add extra boosts
+                alongside the core HF concepts.
+              </p>
+            </div>
+          </div>
+
           <button type=\"submit\" class=\"primary\">Run triage</button>
         </form>
       </section>
@@ -823,7 +903,8 @@ class TriageHandler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_GET(self) -> None:  # noqa: N802
-        page = _render_page("", [], 5, [], False)
+        tag_text = "\n".join(TAG_LIST)
+        page = _render_page("", [], 5, [], False, tag_text)
         self._send_html(page)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -837,6 +918,8 @@ class TriageHandler(BaseHTTPRequestHandler):
             score_threshold = 5
         active_domains = data.get("domains", [])
         use_llm = data.get("use_llm", ["no"])[0] == "yes"
+        tag_text = data.get("custom_tags", ["\n".join(TAG_LIST)])[0]
+        tag_list = _parse_custom_tags(tag_text)
 
         headlines = parse_headlines(headlines_text)
         results = score_headlines(
@@ -844,6 +927,7 @@ class TriageHandler(BaseHTTPRequestHandler):
             active_domains=active_domains,
             score_threshold=score_threshold,
             use_llm=use_llm,
+            tag_list=tag_list,
         )
         page = _render_page(
             headlines_text,
@@ -851,6 +935,7 @@ class TriageHandler(BaseHTTPRequestHandler):
             score_threshold,
             active_domains,
             use_llm,
+            tag_text,
         )
         self._send_html(page)
 
