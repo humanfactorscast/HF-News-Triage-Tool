@@ -442,15 +442,18 @@ def _render_page(
       :root {{
         color-scheme: light;
         font-family: "Inter", "Segoe UI", system-ui, sans-serif;
-        --bg: #f7f8fb;
+        --bg: #f5f7fb;
         --panel: #ffffff;
-        --text: #1e1f25;
-        --muted: #5b616e;
-        --primary: #335cff;
-        --border: #e3e6ef;
-        --low: #f4b942;
-        --medium: #ff8c42;
-        --high: #2f9e44;
+        --text: #10223b;
+        --muted: #4b5d73;
+        --primary: #15375f;
+        --primary-strong: #2d76a0;
+        --accent: #448841;
+        --border: #dbe4ef;
+        --low: #cb462b;
+        --medium: #2d76a0;
+        --high: #448841;
+        --surface: #f0f5fb;
       }}
 
       * {{
@@ -470,12 +473,38 @@ def _render_page(
         padding: 32px;
       }}
 
+      .hero {{
+        margin-bottom: 20px;
+        padding: 20px;
+        border-radius: 16px;
+        background: linear-gradient(120deg, #15375f 0%, #2d76a0 100%);
+        color: #ffffff;
+        box-shadow: 0 12px 30px rgba(21, 55, 95, 0.25);
+      }}
+
+      .hero h1 {{
+        margin: 0 0 6px;
+        font-size: 1.8rem;
+      }}
+
+      .hero p {{
+        margin: 0;
+        color: #e6eef7;
+      }}
+
       .panel {{
         background: var(--panel);
         border-radius: 16px;
         padding: 24px;
         border: 1px solid var(--border);
         box-shadow: 0 10px 24px rgba(30, 31, 37, 0.08);
+      }}
+
+      .panel-header {{
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 16px;
       }}
 
       h1,
@@ -487,6 +516,11 @@ def _render_page(
       .subtitle {{
         color: var(--muted);
         margin-top: 4px;
+      }}
+
+      .supporting {{
+        font-size: 0.95rem;
+        color: var(--muted);
       }}
 
       .form {{
@@ -502,6 +536,7 @@ def _render_page(
         border: 1px solid var(--border);
         font-size: 0.95rem;
         resize: vertical;
+        background: var(--surface);
       }}
 
       .controls {{
@@ -511,11 +546,16 @@ def _render_page(
         align-items: flex-start;
       }}
 
+      .controls > div {{
+        min-width: 200px;
+      }}
+
       .controls input[type=\"number\"] {{
         width: 88px;
         padding: 8px;
         border-radius: 8px;
         border: 1px solid var(--border);
+        background: #ffffff;
       }}
 
       .domain-group {{
@@ -527,6 +567,8 @@ def _render_page(
         display: flex;
         align-items: center;
         gap: 8px;
+        font-size: 0.9rem;
+        color: var(--muted);
       }}
 
       .primary {{
@@ -537,6 +579,7 @@ def _render_page(
         border-radius: 10px;
         font-weight: 600;
         cursor: pointer;
+        box-shadow: 0 6px 14px rgba(21, 55, 95, 0.2);
       }}
 
       .results-table {{
@@ -551,7 +594,7 @@ def _render_page(
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 16px;
-        background: #fbfbfd;
+        background: #ffffff;
       }}
 
       .result-header {{
@@ -564,7 +607,7 @@ def _render_page(
       .score {{
         font-size: 1.4rem;
         font-weight: 700;
-        background: #eef1ff;
+        background: #eaf2fb;
         color: var(--primary);
         padding: 4px 10px;
         border-radius: 10px;
@@ -598,8 +641,8 @@ def _render_page(
       }}
 
       .tags span {{
-        background: #eef1ff;
-        color: #1d2c6b;
+        background: #eaf2fb;
+        color: var(--primary);
         padding: 4px 8px;
         border-radius: 999px;
         font-size: 0.8rem;
@@ -649,11 +692,15 @@ def _render_page(
   <body>
     <main class=\"layout\">
       <section class=\"panel\">
-        <header>
-          <h1>HF Headline Triage</h1>
-          <p class=\"subtitle\">
-            Paste a list of headlines and rank them by human factors relevance with tags,
-            angles, and a top 20 shortlist.
+        <div class=\"hero\">
+          <h1>Human Factors Cast — Headline Triage</h1>
+          <p>Take a deeper look into the human element in our ever changing digital world.</p>
+        </div>
+        <header class=\"panel-header\">
+          <h2>Score headlines for HF/UX relevance</h2>
+          <p class=\"supporting\">
+            Use this triage view to spotlight stories with meaningful human-system angles for
+            the show. Keep the shortlist focused, diverse, and grounded in HF practice.
           </p>
         </header>
         <form method=\"post\" class=\"form\">
@@ -687,7 +734,7 @@ def _render_page(
       </section>
 
       <section class=\"panel results\">
-        <header>
+        <header class=\"panel-header\">
           <h2>Top Results</h2>
           <p class=\"subtitle\">Ranked by score, confidence, and diversity.</p>
         </header>
