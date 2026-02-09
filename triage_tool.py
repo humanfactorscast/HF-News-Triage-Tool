@@ -4,11 +4,13 @@ import csv
 import html
 import json
 import re
+import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.error import URLError
 from urllib.parse import parse_qs
 from urllib.request import Request, urlopen
+from xml.etree import ElementTree
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,104 @@ def parse_headlines(raw_text: str) -> list[Headline]:
     return _parse_block_lines(lines)
 
 
+def parse_rss_feeds(feed_urls: list[str], max_age_days: int) -> list[Headline]:
+    headlines: list[Headline] = []
+    cutoff = time.time() - max(0, max_age_days) * 86400
+    for url in feed_urls:
+        if not url:
+            continue
+        try:
+            with urlopen(url, timeout=3) as response:
+                content = response.read()
+        except (URLError, TimeoutError):
+            continue
+        try:
+            root = ElementTree.fromstring(content)
+        except ElementTree.ParseError:
+            continue
+        headlines.extend(_parse_rss_root(root, url, cutoff))
+    return headlines
+
+
+def _parse_rss_root(root: ElementTree.Element, feed_url: str, cutoff: float) -> list[Headline]:
+    items: list[Headline] = []
+    channel = root.find("channel")
+    if channel is not None:
+        items.extend(_parse_rss_items(channel, feed_url, cutoff))
+    else:
+        items.extend(_parse_atom_entries(root, feed_url, cutoff))
+    return items
+
+
+def _parse_rss_items(
+    channel: ElementTree.Element,
+    feed_url: str,
+    cutoff: float,
+) -> list[Headline]:
+    items: list[Headline] = []
+    source = _get_text(channel.find("title")) or feed_url
+    for item in channel.findall("item"):
+        title = _get_text(item.find("title"))
+        if not title:
+            continue
+        link = _get_text(item.find("link"))
+        description = _get_text(item.find("description"))
+        published = _get_text(item.find("pubDate"))
+        if cutoff and published:
+            published_ts = _parse_rss_date(published)
+            if published_ts and published_ts < cutoff:
+                continue
+        items.append(
+            Headline(
+                title=title,
+                url=link,
+                source=source,
+                description=_trim_description(description),
+                time_ago=_format_time_ago(published),
+            )
+        )
+    return items
+
+
+def _parse_atom_entries(
+    root: ElementTree.Element,
+    feed_url: str,
+    cutoff: float,
+) -> list[Headline]:
+    items: list[Headline] = []
+    namespace = _atom_namespace(root)
+    source = _get_text(root.find(f"{namespace}title")) or feed_url
+    for entry in root.findall(f"{namespace}entry"):
+        title = _get_text(entry.find(f"{namespace}title"))
+        if not title:
+            continue
+        link = None
+        for link_node in entry.findall(f"{namespace}link"):
+            if link_node.attrib.get("rel") in (None, "alternate"):
+                link = link_node.attrib.get("href")
+                break
+        description = _get_text(entry.find(f"{namespace}summary")) or _get_text(
+            entry.find(f"{namespace}content")
+        )
+        published = _get_text(entry.find(f"{namespace}updated")) or _get_text(
+            entry.find(f"{namespace}published")
+        )
+        if cutoff and published:
+            published_ts = _parse_rss_date(published)
+            if published_ts and published_ts < cutoff:
+                continue
+        items.append(
+            Headline(
+                title=title,
+                url=link,
+                source=source,
+                description=_trim_description(description),
+                time_ago=_format_time_ago(published),
+            )
+        )
+    return items
+
+
 def _parse_csv_lines(lines: list[str]) -> list[Headline]:
     headlines: list[Headline] = []
     for line in lines:
@@ -195,6 +295,50 @@ def _parse_block_lines(lines: list[str]) -> list[Headline]:
 
 def _looks_like_time(value: str) -> bool:
     return bool(re.match(r"^\\d+\\s*[hm]$", value.strip().lower()))
+
+
+def _get_text(node: ElementTree.Element | None) -> str | None:
+    if node is None or node.text is None:
+        return None
+    return node.text.strip()
+
+
+def _atom_namespace(root: ElementTree.Element) -> str:
+    if root.tag.startswith("{"):
+        return root.tag.split("}")[0] + "}"
+    return ""
+
+
+def _parse_rss_date(value: str) -> float | None:
+    for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            return time.mktime(time.strptime(value, fmt))
+        except ValueError:
+            continue
+    return None
+
+
+def _format_time_ago(value: str | None) -> str | None:
+    if not value:
+        return None
+    timestamp = _parse_rss_date(value)
+    if not timestamp:
+        return None
+    delta = int(time.time() - timestamp)
+    hours = max(1, delta // 3600)
+    if hours < 24:
+        return f"{hours}h"
+    days = max(1, hours // 24)
+    return f"{days}d"
+
+
+def _trim_description(description: str | None, limit: int = 220) -> str | None:
+    if not description:
+        return None
+    cleaned = re.sub(r"<[^>]+>", "", description).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1].rstrip() + "…"
 
 
 def _llm_infer_score(headline: Headline) -> tuple[int, str | None]:
@@ -452,6 +596,15 @@ def _parse_custom_tags(raw_text: str) -> list[str]:
     return tags or TAG_LIST
 
 
+def _parse_rss_urls(raw_text: str) -> list[str]:
+    urls: list[str] = []
+    for line in raw_text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            urls.append(cleaned)
+    return urls
+
+
 def _diversify(items: list[ScoredHeadline]) -> list[ScoredHeadline]:
     seen: list[str] = []
     diversified: list[ScoredHeadline] = []
@@ -493,10 +646,13 @@ def _render_page(
     active_domains: list[str],
     use_llm: bool,
     tag_text: str,
+    rss_text: str,
+    rss_days: int,
 ) -> str:
     escaped_headlines = html.escape(headlines_text)
     llm_checked = "checked" if use_llm else ""
     escaped_tags = html.escape(tag_text)
+    escaped_rss = html.escape(rss_text)
     domain_markup = "".join(
         """
         <label class=\"checkbox\">
@@ -735,6 +891,14 @@ def _render_page(
         font-size: 0.9rem;
       }}
 
+      .settings-panel input[type=\"number\"] {{
+        width: 120px;
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #ffffff;
+      }}
+
       .settings-note {{
         font-size: 0.85rem;
         color: var(--muted);
@@ -936,6 +1100,10 @@ def _render_page(
             <div class=\"settings-panel\">
               <label for=\"custom_tags\">HF tag list (one per line)</label>
               <textarea id=\"custom_tags\" name=\"custom_tags\">{escaped_tags}</textarea>
+              <label for=\"rss_urls\">RSS feeds (one URL per line)</label>
+              <textarea id=\"rss_urls\" name=\"rss_urls\" placeholder=\"https://example.com/rss\">{escaped_rss}</textarea>
+              <label for=\"rss_days\">Only include items from the last (days)</label>
+              <input id=\"rss_days\" name=\"rss_days\" type=\"number\" min=\"0\" value=\"{rss_days}\" />
               <p class=\"settings-note\">
                 Edit tags to tailor scoring to your show’s focus. These tags add extra boosts
                 alongside the core HF concepts.
@@ -971,7 +1139,7 @@ class TriageHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         tag_text = "\n".join(TAG_LIST)
-        page = _render_page("", [], 5, [], False, tag_text)
+        page = _render_page("", [], 5, [], False, tag_text, "", 7)
         self._send_html(page)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -987,8 +1155,16 @@ class TriageHandler(BaseHTTPRequestHandler):
         use_llm = data.get("use_llm", ["no"])[0] == "yes"
         tag_text = data.get("custom_tags", ["\n".join(TAG_LIST)])[0]
         tag_list = _parse_custom_tags(tag_text)
+        rss_text = data.get("rss_urls", [""])[0]
+        rss_urls = _parse_rss_urls(rss_text)
+        try:
+            rss_days = int(data.get("rss_days", ["7"])[0])
+        except ValueError:
+            rss_days = 7
 
         headlines = parse_headlines(headlines_text)
+        if rss_urls:
+            headlines.extend(parse_rss_feeds(rss_urls, rss_days))
         results = score_headlines(
             headlines=headlines,
             active_domains=active_domains,
@@ -1003,6 +1179,8 @@ class TriageHandler(BaseHTTPRequestHandler):
             active_domains,
             use_llm,
             tag_text,
+            rss_text,
+            rss_days,
         )
         self._send_html(page)
 

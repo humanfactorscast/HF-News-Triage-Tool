@@ -114,6 +114,7 @@ Controls:
 - Scoring uses the Human Factors tag list (provided) as additional keyword signals and boosts.
 - The tag list can be edited in the UI via the Settings menu (hamburger) to tune scoring.
 - Rationale now includes angle prompts, confidence drivers, and a show framing line for podcast prep.
+- RSS feed URLs can be added in Settings with a configurable “last N days” filter.
 
 ## UI sketch (simple)
 
