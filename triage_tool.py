@@ -12,6 +12,7 @@ from urllib.parse import parse_qs
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
+APP_VERSION = "0.12.0"
 
 @dataclass(frozen=True)
 class Headline:
@@ -130,6 +131,20 @@ def parse_rss_feeds(feed_urls: list[str], max_age_days: int) -> list[Headline]:
             continue
         headlines.extend(_parse_rss_root(root, url, cutoff))
     return headlines
+
+
+def format_headlines_for_input(headlines: list[Headline]) -> str:
+    lines: list[str] = []
+    for item in headlines:
+        if item.source:
+            lines.append(item.source)
+        lines.append(item.title)
+        if item.description:
+            lines.append(item.description)
+        if item.time_ago:
+            lines.append(item.time_ago)
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 def _parse_rss_root(root: ElementTree.Element, feed_url: str, cutoff: float) -> list[Headline]:
@@ -965,6 +980,30 @@ def _render_page(
         box-shadow: 0 6px 14px rgba(21, 55, 95, 0.2);
       }}
 
+      .secondary {{
+        background: transparent;
+        color: var(--primary);
+        border: 1px solid var(--border);
+        padding: 10px 16px;
+        border-radius: 10px;
+        font-weight: 600;
+        cursor: pointer;
+      }}
+
+      .form-actions {{
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }}
+
+      .version {{
+        margin-top: 16px;
+        font-size: 0.8rem;
+        color: var(--muted);
+        text-align: right;
+      }}
+
       .results-table {{
         display: grid;
         gap: 16px;
@@ -1138,8 +1177,16 @@ def _render_page(
             </p>
           </div>
 
-          <button type=\"submit\" class=\"primary\">Run triage</button>
+          <div class=\"form-actions\">
+            <button type=\"submit\" name=\"action\" value=\"fetch_feeds\" class=\"secondary\">
+              Fetch RSS feeds
+            </button>
+            <button type=\"submit\" name=\"action\" value=\"run_triage\" class=\"primary\">
+              Run triage
+            </button>
+          </div>
         </form>
+        <p class=\"version\">Version {APP_VERSION}</p>
       </section>
 
       <section class=\"panel results\">
@@ -1188,10 +1235,17 @@ class TriageHandler(BaseHTTPRequestHandler):
             rss_days = int(data.get("rss_days", ["7"])[0])
         except ValueError:
             rss_days = 7
+        action = data.get("action", ["run_triage"])[0]
 
         headlines = parse_headlines(headlines_text)
+        rss_items: list[Headline] = []
         if rss_urls:
-            headlines.extend(parse_rss_feeds(rss_urls, rss_days))
+            rss_items = parse_rss_feeds(rss_urls, rss_days)
+            if action == "fetch_feeds":
+                headlines_text = format_headlines_for_input(rss_items)
+                headlines = rss_items
+            else:
+                headlines.extend(rss_items)
         results = score_headlines(
             headlines=headlines,
             active_domains=active_domains,
