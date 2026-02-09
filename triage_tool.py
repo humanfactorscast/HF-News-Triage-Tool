@@ -857,6 +857,11 @@ def _render_page(
         cursor: pointer;
         font-weight: 600;
         color: var(--primary);
+        border: 1px solid var(--border);
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: #ffffff;
+        box-shadow: 0 6px 14px rgba(21, 55, 95, 0.08);
       }}
 
       .settings-toggle span {{
@@ -870,6 +875,12 @@ def _render_page(
         height: 2px;
         background: var(--primary);
         border-radius: 999px;
+      }}
+
+      .settings-header {{
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 12px;
       }}
 
       .settings-panel {{
@@ -1062,6 +1073,16 @@ def _render_page(
           </p>
         </header>
         <form method=\"post\" class=\"form\">
+          <div class=\"settings-header\">
+            <label class=\"settings-toggle\" for=\"settings-toggle\" aria-label=\"Open settings\">
+              <span>
+                <i></i>
+                <i></i>
+                <i></i>
+              </span>
+              Settings
+            </label>
+          </div>
           <label for=\"headlines\">Headlines (CSV: title, url, source, description, time ago or blocks)</label>
           <textarea id=\"headlines\" name=\"headlines\" rows=\"14\" required>{escaped_headlines}</textarea>
 
@@ -1087,28 +1108,18 @@ def _render_page(
             </label>
           </div>
 
-          <div>
-            <label class=\"settings-toggle\" for=\"settings-toggle\">
-              <span>
-                <i></i>
-                <i></i>
-                <i></i>
-              </span>
-              Settings
-            </label>
-            <input type=\"checkbox\" id=\"settings-toggle\" hidden />
-            <div class=\"settings-panel\">
-              <label for=\"custom_tags\">HF tag list (one per line)</label>
-              <textarea id=\"custom_tags\" name=\"custom_tags\">{escaped_tags}</textarea>
-              <label for=\"rss_urls\">RSS feeds (one URL per line)</label>
-              <textarea id=\"rss_urls\" name=\"rss_urls\" placeholder=\"https://example.com/rss\">{escaped_rss}</textarea>
-              <label for=\"rss_days\">Only include items from the last (days)</label>
-              <input id=\"rss_days\" name=\"rss_days\" type=\"number\" min=\"0\" value=\"{rss_days}\" />
-              <p class=\"settings-note\">
-                Edit tags to tailor scoring to your show’s focus. These tags add extra boosts
-                alongside the core HF concepts.
-              </p>
-            </div>
+          <input type=\"checkbox\" id=\"settings-toggle\" hidden />
+          <div class=\"settings-panel\">
+            <label for=\"custom_tags\">HF tag list (one per line)</label>
+            <textarea id=\"custom_tags\" name=\"custom_tags\">{escaped_tags}</textarea>
+            <label for=\"rss_urls\">RSS feeds (one URL per line)</label>
+            <textarea id=\"rss_urls\" name=\"rss_urls\" placeholder=\"https://example.com/rss\">{escaped_rss}</textarea>
+            <label for=\"rss_days\">Only include items from the last (days)</label>
+            <input id=\"rss_days\" name=\"rss_days\" type=\"number\" min=\"0\" value=\"{rss_days}\" />
+            <p class=\"settings-note\">
+              Edit tags to tailor scoring to your show’s focus. These tags add extra boosts
+              alongside the core HF concepts.
+            </p>
           </div>
 
           <button type=\"submit\" class=\"primary\">Run triage</button>
