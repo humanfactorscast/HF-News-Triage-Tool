@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import csv
 import html
+import json
 import re
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.error import URLError
 from urllib.parse import parse_qs
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True)
@@ -158,15 +161,61 @@ def _looks_like_time(value: str) -> bool:
     return bool(re.match(r"^\\d+\\s*[hm]$", value.strip().lower()))
 
 
+def _llm_infer_score(headline: Headline) -> tuple[int, str | None]:
+    prompt = (
+        "You are an assistant scoring news headlines for human factors relevance. "
+        "Given a headline and description, return JSON with keys score (1-10) and "
+        "summary (short phrase). Focus on HF/UX/HCI/safety/automation relevance, "
+        "and allow broad applicability for a human factors podcast.\\n\\n"
+        f"Headline: {headline.title}\\n"
+        f"Description: {headline.description or ''}\\n"
+        "JSON:"
+    )
+    payload = json.dumps(
+        {
+            "prompt": prompt,
+            "max_tokens": 120,
+            "temperature": 0.2,
+        }
+    ).encode("utf-8")
+    request = Request(
+        "http://localhost:8080/completion",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urlopen(request, timeout=2) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return 0, None
+
+    text = data.get("content") or data.get("text") or ""
+    match = re.search(r"\\{.*\\}", text, re.DOTALL)
+    if not match:
+        return 0, None
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return 0, None
+    score = parsed.get("score")
+    summary = parsed.get("summary")
+    if isinstance(score, int) and 1 <= score <= 10:
+        return score, str(summary).strip() if summary else None
+    return 0, None
+
+
 def score_headlines(
     headlines: list[Headline],
     active_domains: list[str],
     score_threshold: int,
+    use_llm: bool,
     top_n: int = 20,
     max_per_source: int = 3,
 ) -> list[ScoredHeadline]:
     active_concepts = _resolve_concepts(active_domains)
-    scored = [_score_one(headline, active_concepts) for headline in headlines]
+    scored = [
+        _score_one(headline, active_concepts, use_llm=use_llm) for headline in headlines
+    ]
     filtered = [item for item in scored if item.score >= score_threshold]
     diversified = _diversify(filtered)
     sorted_items = sorted(
@@ -191,8 +240,16 @@ def _resolve_concepts(active_domains: list[str]) -> dict[str, list[str]]:
     return {concept: CONCEPTS[concept] for concept in allowed}
 
 
-def _score_one(headline: Headline, concepts: dict[str, list[str]]) -> ScoredHeadline:
-    text = headline.title.lower()
+def _score_one(
+    headline: Headline,
+    concepts: dict[str, list[str]],
+    use_llm: bool,
+) -> ScoredHeadline:
+    text = " ".join(
+        part.lower()
+        for part in [headline.title, headline.description]
+        if part and part.strip()
+    )
     matches: list[tuple[str, str]] = []
     for concept, keywords in concepts.items():
         for keyword in keywords:
@@ -202,12 +259,19 @@ def _score_one(headline: Headline, concepts: dict[str, list[str]]) -> ScoredHead
 
     unique_concepts = {concept for concept, _ in matches}
     score = 1 + min(9, len(unique_concepts) * 2)
+    llm_summary = None
+    if use_llm:
+        llm_score, llm_summary = _llm_infer_score(headline)
+        llm_bonus = max(0, min(3, llm_score - score))
+        score = min(10, score + llm_bonus)
     tags = sorted(unique_concepts)[:5]
     angle = _build_angle(tags)
     confidence = _confidence_for(score, len(unique_concepts))
     rationale = [f"Matched {concept}." for concept in tags] or [
         "No strong human factors cues found in the headline.",
     ]
+    if llm_summary:
+        rationale.append(f"LLM signal: {llm_summary}")
     return ScoredHeadline(
         headline=headline,
         score=score,
@@ -281,8 +345,10 @@ def _render_page(
     results: list[ScoredHeadline],
     score_threshold: int,
     active_domains: list[str],
+    use_llm: bool,
 ) -> str:
     escaped_headlines = html.escape(headlines_text)
+    llm_checked = "checked" if use_llm else ""
     domain_markup = "".join(
         """
         <label class=\"checkbox\">
@@ -610,6 +676,10 @@ def _render_page(
               <span>Domains</span>
               {domain_markup}
             </div>
+            <label class=\"checkbox\">
+              <input type=\"checkbox\" name=\"use_llm\" value=\"yes\" {llm_checked} />
+              Use local LLM (http://localhost:8080/completion)
+            </label>
           </div>
 
           <button type=\"submit\" class=\"primary\">Run triage</button>
@@ -639,7 +709,7 @@ class TriageHandler(BaseHTTPRequestHandler):
         self.wfile.write(encoded)
 
     def do_GET(self) -> None:  # noqa: N802
-        page = _render_page("", [], 5, [])
+        page = _render_page("", [], 5, [], False)
         self._send_html(page)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -652,14 +722,22 @@ class TriageHandler(BaseHTTPRequestHandler):
         except ValueError:
             score_threshold = 5
         active_domains = data.get("domains", [])
+        use_llm = data.get("use_llm", ["no"])[0] == "yes"
 
         headlines = parse_headlines(headlines_text)
         results = score_headlines(
             headlines=headlines,
             active_domains=active_domains,
             score_threshold=score_threshold,
+            use_llm=use_llm,
         )
-        page = _render_page(headlines_text, results, score_threshold, active_domains)
+        page = _render_page(
+            headlines_text,
+            results,
+            score_threshold,
+            active_domains,
+            use_llm,
+        )
         self._send_html(page)
 
     def log_message(self, format: str, *args: object) -> None:
