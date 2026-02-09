@@ -316,6 +316,16 @@ def _score_one(
         rationale.append(f"Tag signal: {', '.join(tag_matches[:5])}.")
     if llm_summary:
         rationale.append(f"LLM signal: {llm_summary}")
+    rationale.extend(_build_angle_prompts(tags))
+    rationale.append(_build_topic_framing(tags))
+    rationale.extend(
+        _build_confidence_drivers(
+            headline=headline,
+            unique_concepts=len(unique_concepts),
+            tag_matches=len(tag_matches),
+            llm_used=use_llm,
+        )
+    )
     return ScoredHeadline(
         headline=headline,
         score=score,
@@ -332,6 +342,63 @@ def _build_angle(tags: list[str]) -> str:
     if len(tags) == 1:
         return f"Strong signal for {tags[0]} in a human-system context."
     return f"Touches on {', '.join(tags[:-1])}, and {tags[-1]} in human-system work."
+
+
+def _build_angle_prompts(tags: list[str]) -> list[str]:
+    prompts = []
+    prompt_map = {
+        "trust in automation": "How does this affect trust in automation?",
+        "situation awareness": "What does this mean for situation awareness on the job?",
+        "workload": "Does this shift workload, fatigue, or cognitive load?",
+        "usability": "What usability friction or design trade-off is exposed?",
+        "error": "Is there a clear human error mechanism or recovery path?",
+        "safety culture": "What does this say about safety culture and oversight?",
+        "decision making": "How are decisions supported or undermined?",
+        "human-ai teams": "Where do humans and AI coordinate or clash?",
+        "training": "What training gaps or performance aids show up?",
+        "healthcare": "How does this impact clinical work and patient safety?",
+        "transport": "What operational safety or automation issue is at play?",
+        "org factors": "How do teams, handoffs, or coordination shift here?",
+    }
+    for tag in tags:
+        prompt = prompt_map.get(tag)
+        if prompt:
+            prompts.append(f"Angle prompt: {prompt}")
+    return prompts[:3]
+
+
+def _build_topic_framing(tags: list[str]) -> str:
+    if not tags:
+        return "Show framing: This could be a broader story about human-system fit once more context is gathered."
+    if len(tags) == 1:
+        return f"Show framing: Use this as a case study in {tags[0]} and its real-world implications."
+    return (
+        "Show framing: Highlight how "
+        + ", ".join(tags[:2])
+        + " connect to everyday human performance and system design."
+    )
+
+
+def _build_confidence_drivers(
+    headline: Headline,
+    unique_concepts: int,
+    tag_matches: int,
+    llm_used: bool,
+) -> list[str]:
+    drivers = []
+    if headline.description:
+        drivers.append("Confidence driver: Description provides added context.")
+    else:
+        drivers.append("Confidence driver: Limited context (headline only).")
+    if unique_concepts >= 2:
+        drivers.append("Confidence driver: Multiple HF concepts detected.")
+    else:
+        drivers.append("Confidence driver: Few explicit HF concepts detected.")
+    if tag_matches:
+        drivers.append("Confidence driver: Tag list aligned with the story language.")
+    if llm_used:
+        drivers.append("Confidence driver: Local LLM signal included.")
+    return drivers
 
 
 def _confidence_for(score: int, matches: int) -> str:
